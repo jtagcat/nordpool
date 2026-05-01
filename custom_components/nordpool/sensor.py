@@ -5,38 +5,35 @@ from statistics import mean, median
 
 import homeassistant.helpers.config_validation as cv
 import voluptuous as vol
-from homeassistant.components.sensor import PLATFORM_SCHEMA
-from homeassistant.const import CONF_REGION
-from homeassistant.helpers.dispatcher import async_dispatcher_connect
-from homeassistant.helpers.template import Template
-from homeassistant.util import dt as dt_utils
+from homeassistant.components.sensor import PLATFORM_SCHEMA, SensorEntity
 
 # Import sensor entity and classes.
 from homeassistant.components.sensor.const import (
     SensorDeviceClass,
     SensorStateClass,
 )
-
-from homeassistant.components.sensor import SensorEntity
+from homeassistant.const import CONF_REGION
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
+from homeassistant.helpers.template import Template
+from homeassistant.util import dt as dt_utils
 from jinja2 import pass_context
 
 from .const import (
-    DOMAIN,
-    EVENT_NEW_DAY,
-    EVENT_NEW_PRICE,
-    EVENT_NEW_HOUR,
-    SENTINEL,
-    RANDOM_MINUTE,
-    RANDOM_SECOND,
-    DEFAULT_TEMPLATE,
-    DEFAULT_REGION,
+    _CENT_MULTIPLIER,
+    _CURRENTY_TO_CENTS,
     _PRICE_IN,
     _REGIONS,
-    _CURRENTY_TO_CENTS,
-    _CENT_MULTIPLIER,
+    DEFAULT_REGION,
+    DEFAULT_TEMPLATE,
+    DOMAIN,
+    EVENT_NEW_DAY,
+    EVENT_NEW_HOUR,
+    EVENT_NEW_PRICE,
+    RANDOM_MINUTE,
+    RANDOM_SECOND,
+    SENTINEL,
 )
 from .misc import start_of, stock
-
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -54,6 +51,7 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
         vol.Optional("low_price_cutoff", default=1.0): cv.small_float,
         vol.Optional("price_type", default="kWh"): vol.In(list(_PRICE_IN.keys())),
         vol.Optional("price_in_cents", default=False): cv.boolean,
+        vol.Optional("round_to_hours", default=False): bool,
         vol.Optional("additional_costs", default=DEFAULT_TEMPLATE): cv.template,
     }
 )
@@ -71,6 +69,7 @@ def _dry_setup(hass, config, add_devices, discovery_info=None):
     currency = config.get("currency")
     vat = config.get("VAT")
     use_cents = config.get("price_in_cents")
+    round_hours = config.get("round_to_hours")
     ad_template = config.get("additional_costs")
     api = hass.data[DOMAIN]
     sensor = NordpoolSensor(
@@ -82,6 +81,7 @@ def _dry_setup(hass, config, add_devices, discovery_info=None):
         currency,
         vat,
         use_cents,
+        round_hours,
         api,
         ad_template,
         hass,
@@ -123,6 +123,7 @@ class NordpoolSensor(SensorEntity):
         currency,
         vat,
         use_cents,
+        round_hours,
         api,
         ad_template,
         hass,
@@ -135,6 +136,7 @@ class NordpoolSensor(SensorEntity):
         self._attr_suggested_display_precision = precision
         self._low_price_cutoff = low_price_cutoff
         self._use_cents = use_cents
+        self._round_hours = round_hours
         self._api = api
         self._ad_template = ad_template
         self._hass = hass
@@ -396,11 +398,13 @@ class NordpoolSensor(SensorEntity):
             "current_price": self.current_price,
             "additional_costs_current_hour": self.additional_costs,
             "price_in_cents": self._use_cents,
+            "round_to_hours": self._round_hours,
         }
 
     def _add_raw(self, data) -> list:
         """Helper"""
         result = []
+
         for res in self._someday(data):
             item = {
                 "start": res["start"],
@@ -408,7 +412,46 @@ class NordpoolSensor(SensorEntity):
                 "value": self._calc_price(res["value"], fake_dt=res["start"]),
             }
             result.append(item)
-        return result
+
+        if not self._round_hours:
+            return result
+
+        return self._rounded_result(result)
+
+    def _rounded_result(self, unrounded: list) -> list:
+        if not unrounded:
+            return []
+
+        rounded = []
+        current_group = [unrounded[0]]
+
+        for item in unrounded[1:]:
+            if (item["start"] - current_group[-1]["end"]).total_seconds() == 0:
+                current_group.append(item)
+            else:
+                rounded.append(self._aggregate_hours(current_group))
+                current_group = [item]
+
+        if current_group:
+            rounded.append(self._aggregate_hours(current_group))
+
+        return rounded
+
+    def _aggregate_hours(self, items: list) -> dict:
+        """Arithmetic average of hours in list."""
+
+        if len(items) > 4:
+            _LOGGER.info(
+                "_aggregate_hours called with %s items; rounding more than 4 periods into one hour",
+                len(items),
+            )
+
+        avg_price = mean([item["value"] for item in items])
+        return {
+            "start": items[0]["start"],
+            "end": items[-1]["end"],
+            "value": round(avg_price, self._precision),
+        }
 
     @property
     def raw_today(self) -> list:

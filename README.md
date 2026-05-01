@@ -102,6 +102,9 @@ sensor:
     # Display price in cents in stead of (for example) Euros.
     price_in_cents: false
 
+    # 15 minutes to hours, for hour-based metering.
+    round_to_hours: false
+
     # Price displayed for MWh, kWh or Wh
     price_type: kWh
 
@@ -217,6 +220,7 @@ Add 21% tax and overhead cost stored in a helper
 - ```current_price```: What the current price is
 - ```additional_costs_current_hour```: If there is any additional costs this hour
 - ```price_in_cents```: Boolean if prices is in cents
+- ```round_to_hours```: Round each 15 minutes to 1 hours. For hour-based metering
 
 ## Actions
 Actions has recently been added. The action will just forward the raw response from the Nordpool API so you can capture the value your are interested in.

@@ -12,6 +12,7 @@
                     "precision": "Decimal rounding precision",
                     "low_price_cutoff": "Low price percentage",
                     "price_in_cents": "Price in cents",
+                    "round_to_hours": "Round to hours",
                     "price_type": "Energy scale",
                     "additional_costs": "Template for additional costs"
                 }
