@@ -423,17 +423,22 @@ class NordpoolSensor(SensorEntity):
             return []
 
         rounded = []
-        current_group = [unrounded[0]]
+        rounding_group = [unrounded[0]]
+        rounding_group_ident = unrounded[0]["start"].replace(minute=0)
 
         for item in unrounded[1:]:
-            if (item["start"] - current_group[-1]["end"]).total_seconds() == 0:
-                current_group.append(item)
-            else:
-                rounded.append(self._aggregate_hours(current_group))
-                current_group = [item]
+            item_hour = item["start"].replace(minute=0)
 
-        if current_group:
-            rounded.append(self._aggregate_hours(current_group))
+            if item_hour == rounding_group_ident:
+                rounding_group.append(item)
+            else:
+                rounded.append(self._aggregate_hours(rounding_group))
+
+                rounding_group = [item]
+                rounding_group_ident = item_hour
+
+        if rounding_group:
+            rounded.append(self._aggregate_hours(rounding_group))
 
         return rounded
 
